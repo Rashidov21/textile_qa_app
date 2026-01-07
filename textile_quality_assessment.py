@@ -56,55 +56,18 @@ class TextileQualityAssessment:
         self.is_analyzing = False  # Track analysis state for UX improvements
         
         # Quality thresholds (adjustable based on testing)
-        self.COLOR_VARIANCE_THRESHOLD_GOOD = 500      # Low variance = uniform color = good
-        self.COLOR_VARIANCE_THRESHOLD_MEDIUM = 1500   # Medium variance
-        self.DEFECT_AREA_THRESHOLD_SMALL = 0.01       # 1% of image area
-        self.DEFECT_AREA_THRESHOLD_MEDIUM = 0.05      # 5% of image area
-        
-        # ML Models and Analysis Mode
-        self.ml_quality_model = None
-        self.analysis_mode = "CV"  # "CV", "ML", or "Hybrid"
-        self.ml_available = False
+        # Yumshatilgan threshold qiymatlar - internetdan olingan rasmlar uchun
+        self.COLOR_VARIANCE_THRESHOLD_GOOD = 1500     # Low variance = uniform color = good (3x yumshatildi)
+        self.COLOR_VARIANCE_THRESHOLD_MEDIUM = 3000   # Medium variance (2x yumshatildi)
+        self.DEFECT_AREA_THRESHOLD_SMALL = 0.03       # 3% of image area (3x yumshatildi)
+        self.DEFECT_AREA_THRESHOLD_MEDIUM = 0.10      # 10% of image area (2x yumshatildi)
         
         # Store button references for state management
         self.upload_btn = None
         self.camera_btn = None
         self.stop_camera_btn = None
-        self.mode_var = None
-        self.confidence_label = None
-        
-        # Load ML models
-        self.load_ml_models()
         
         self.setup_gui()
-    
-    def load_ml_models(self):
-        """
-        Load pre-trained ML models if available.
-        Falls back to CV mode if models are not found.
-        """
-        try:
-            import joblib
-            model_path = os.path.join('models', 'quality_classifier.pkl')
-            
-            if os.path.exists(model_path):
-                self.ml_quality_model = joblib.load(model_path)
-                self.ml_available = True
-                self.analysis_mode = "ML"  # Default to ML if available
-                print(f"ML model yuklandi: {model_path}")
-            else:
-                self.ml_available = False
-                self.analysis_mode = "CV"
-                print(f"ML model topilmadi. CV rejimi ishlatilmoqda.")
-                
-        except ImportError:
-            print("joblib o'rnatilmagan. ML rejimi ishlatilmaydi.")
-            self.ml_available = False
-            self.analysis_mode = "CV"
-        except Exception as e:
-            print(f"ML model yuklashda xatolik: {e}")
-            self.ml_available = False
-            self.analysis_mode = "CV"
     
     def setup_gui(self):
         """
@@ -123,7 +86,7 @@ class TextileQualityAssessment:
         # Subtitle
         subtitle_label = tk.Label(
             self.root,
-            text="Rasm va Real-Vaqtli Kamera Tahlili Asosida Avtomatik Sifat Baholash",
+            text="Rasm va Real-vaqtli kamera tahlili asosida avtomatik sifat baholash",
             font=("Arial", 11),
             bg=self.COLOR_BG_MAIN,
             fg=self.COLOR_TEXT_SECONDARY
@@ -221,56 +184,6 @@ class TextileQualityAssessment:
         # Separator with Soft UI styling
         separator = tk.Frame(control_inner, height=1, bg=self.COLOR_BORDER)
         separator.pack(fill=tk.X, padx=15, pady=20)
-        
-        # Analysis Mode Selector
-        mode_frame = tk.Frame(control_inner, bg=self.COLOR_PANEL)
-        mode_frame.pack(pady=10, padx=15, fill=tk.X)
-        
-        tk.Label(
-            mode_frame,
-            text="Tahlil Usuli:",
-            font=("Arial", 10, "bold"),
-            bg=self.COLOR_PANEL,
-            fg=self.COLOR_TEXT_PRIMARY
-        ).pack(anchor=tk.W, pady=(0, 5))
-        
-        self.mode_var = tk.StringVar(value=self.analysis_mode)
-        
-        mode_options = []
-        if self.ml_available:
-            mode_options = [("ML", "ML"), ("Hybrid", "Hybrid"), ("CV", "CV")]
-        else:
-            mode_options = [("CV", "CV")]
-            self.mode_var.set("CV")
-        
-        for text, value in mode_options:
-            rb = tk.Radiobutton(
-                mode_frame,
-                text=text,
-                variable=self.mode_var,
-                value=value,
-                command=self.change_analysis_mode,
-                bg=self.COLOR_PANEL,
-                fg=self.COLOR_TEXT_PRIMARY,
-                selectcolor=self.COLOR_PANEL,
-                activebackground=self.COLOR_PANEL,
-                font=("Arial", 9)
-            )
-            rb.pack(anchor=tk.W, pady=2)
-        
-        # Confidence display label
-        self.confidence_label = tk.Label(
-            control_inner,
-            text="Ishoning: -",
-            font=("Arial", 9),
-            bg=self.COLOR_PANEL,
-            fg=self.COLOR_TEXT_SECONDARY
-        )
-        self.confidence_label.pack(pady=5, padx=15)
-        
-        # Separator with Soft UI styling
-        separator2 = tk.Frame(control_inner, height=1, bg=self.COLOR_BORDER)
-        separator2.pack(fill=tk.X, padx=15, pady=20)
         
         # Results section
         tk.Label(
@@ -471,17 +384,6 @@ class TextileQualityAssessment:
             self.camera_btn.config(state=state)
         # Don't change stop_camera_btn state here as it's controlled by camera state
     
-    def change_analysis_mode(self):
-        """
-        Change analysis mode when user selects different mode.
-        """
-        self.analysis_mode = self.mode_var.get()
-        mode_text = {
-            "ML": "ML Model",
-            "Hybrid": "Hybrid (ML + CV)",
-            "CV": "Klassik CV"
-        }
-        self.status_label.config(text=f"Tahlil usuli: {mode_text.get(self.analysis_mode, self.analysis_mode)}")
     
     def camera_loop(self):
         """
@@ -559,6 +461,68 @@ class TextileQualityAssessment:
             'hsv': hsv
         }
     
+    def preprocess_image_enhanced(self, image):
+        """
+        Yaxshilangan preprocessing - illumination correction, CLAHE, bilateral filter.
+        
+        Steps:
+        1. Resize to standard size
+        2. Illumination correction (LAB color space)
+        3. CLAHE (Contrast Limited Adaptive Histogram Equalization)
+        4. Bilateral filter (noise reduction, edges saqlaydi)
+        5. Gaussian blur
+        6. Convert to grayscale and HSV
+        
+        Args:
+            image: Input BGR image (OpenCV format)
+            
+        Returns:
+            dict: Dictionary containing processed images
+        """
+        # Step 1: Resize image
+        height, width = image.shape[:2]
+        max_dimension = 800
+        if width > max_dimension or height > max_dimension:
+            scale = max_dimension / max(width, height)
+            new_width = int(width * scale)
+            new_height = int(height * scale)
+            resized = cv2.resize(image, (new_width, new_height), interpolation=cv2.INTER_AREA)
+        else:
+            resized = image.copy()
+        
+        # Step 2: Illumination correction using LAB color space
+        lab = cv2.cvtColor(resized, cv2.COLOR_BGR2LAB)
+        l_channel, a, b = cv2.split(lab)
+        
+        # CLAHE (Contrast Limited Adaptive Histogram Equalization)
+        # Bu yorug'likni tekislaydi va kontrastni yaxshilaydi
+        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+        l_channel = clahe.apply(l_channel)
+        
+        # LAB dan BGR ga qaytarish
+        corrected = cv2.merge([l_channel, a, b])
+        corrected = cv2.cvtColor(corrected, cv2.COLOR_LAB2BGR)
+        
+        # Step 3: Bilateral filter - noise reduction, lekin edges saqlaydi
+        # Bu Gaussian blur dan yaxshiroq, chunki edges ni saqlaydi
+        denoised = cv2.bilateralFilter(corrected, 9, 75, 75)
+        
+        # Step 4: Gaussian blur (qo'shimcha smoothing)
+        blurred = cv2.GaussianBlur(denoised, (5, 5), 0)
+        
+        # Step 5: Convert to grayscale and HSV
+        grayscale = cv2.cvtColor(blurred, cv2.COLOR_BGR2GRAY)
+        hsv = cv2.cvtColor(blurred, cv2.COLOR_BGR2HSV)
+        
+        return {
+            'original': resized,
+            'corrected': corrected,
+            'denoised': denoised,
+            'blurred': blurred,
+            'grayscale': grayscale,
+            'hsv': hsv
+        }
+    
     def analyze_color_uniformity(self, hsv_image, grayscale_image):
         """
         Analyze color uniformity of the textile using variance and standard deviation.
@@ -597,6 +561,110 @@ class TextileQualityAssessment:
             'value_std': value_std,
             'combined_variance': combined_variance
         }
+    
+    def analyze_color_uniformity_enhanced(self, hsv_image, grayscale_image):
+        """
+        Yaxshilangan rang bir xilligi tahlili.
+        
+        Qo'shimcha metodlar:
+        - Histogram analysis (std va entropy)
+        - Local patch-based uniformity
+        - Color gradient analysis
+        - Hue va saturation consistency
+        
+        Args:
+            hsv_image: HSV color space image
+            grayscale_image: Grayscale image
+            
+        Returns:
+            dict: Enhanced color uniformity metrics
+        """
+        # Asosiy metrikalar (mavjud)
+        value_channel = hsv_image[:, :, 2]
+        gray_variance = np.var(grayscale_image)
+        gray_std = np.std(grayscale_image)
+        value_variance = np.var(value_channel)
+        value_std = np.std(value_channel)
+        
+        # YANGI: Histogram analysis
+        gray_hist = cv2.calcHist([grayscale_image], [0], None, [256], [0, 256])
+        hist_std = np.std(gray_hist)  # Histogram tarqalishi
+        hist_normalized = gray_hist / np.sum(gray_hist)
+        hist_entropy = -np.sum(hist_normalized * np.log2(hist_normalized + 1e-10))
+        
+        # YANGI: Local color uniformity (patch-based)
+        h, w = grayscale_image.shape
+        patch_size = 64
+        local_variances = []
+        for i in range(0, h - patch_size, patch_size):
+            for j in range(0, w - patch_size, patch_size):
+                patch = grayscale_image[i:i+patch_size, j:j+patch_size]
+                local_variances.append(np.var(patch))
+        local_uniformity = np.std(local_variances) if local_variances else 0
+        # Past local_uniformity = bir xil rang taqsimoti = yaxshi
+        
+        # YANGI: Color gradient analysis
+        grad_x = cv2.Sobel(grayscale_image, cv2.CV_64F, 1, 0, ksize=3)
+        grad_y = cv2.Sobel(grayscale_image, cv2.CV_64F, 0, 1, ksize=3)
+        gradient_magnitude = np.sqrt(grad_x**2 + grad_y**2)
+        gradient_variance = np.var(gradient_magnitude)
+        
+        # YANGI: Hue va Saturation consistency
+        hue_channel = hsv_image[:, :, 0]
+        saturation_channel = hsv_image[:, :, 1]
+        hue_variance = np.var(hue_channel)
+        sat_variance = np.var(saturation_channel)
+        
+        # Combined enhanced variance (weighted)
+        enhanced_variance = (
+            gray_variance * 0.25 +
+            value_variance * 0.20 +
+            hist_std * 0.10 +
+            local_uniformity * 0.15 +
+            gradient_variance * 0.15 +
+            hue_variance * 0.10 +
+            sat_variance * 0.05
+        )
+        
+        return {
+            'gray_variance': gray_variance,
+            'gray_std': gray_std,
+            'value_variance': value_variance,
+            'value_std': value_std,
+            'combined_variance': enhanced_variance,
+            'hist_std': hist_std,
+            'hist_entropy': hist_entropy,
+            'local_uniformity': local_uniformity,
+            'gradient_variance': gradient_variance,
+            'hue_variance': hue_variance,
+            'sat_variance': sat_variance
+        }
+    
+    def calculate_color_consistency_score(self, hsv_image):
+        """
+        Rang izchilligi ballini hisoblash (0-100, yuqori = yaxshi).
+        
+        Args:
+            hsv_image: HSV color space image
+            
+        Returns:
+            float: Consistency score (0-100)
+        """
+        hue_channel = hsv_image[:, :, 0]
+        saturation_channel = hsv_image[:, :, 1]
+        
+        # Hue consistency (past = yaxshi)
+        hue_variance = np.var(hue_channel)
+        hue_std = np.std(hue_channel)
+        
+        # Saturation consistency
+        sat_variance = np.var(saturation_channel)
+        
+        # Color consistency score (0-100, yuqori = yaxshi)
+        # Normalize: variance 0-1000 range ni 0-100 ga map qilish
+        consistency_score = 100 - min(100, (hue_variance + sat_variance) / 10)
+        
+        return max(0, consistency_score)
     
     def detect_defects(self, grayscale_image):
         """
@@ -659,7 +727,7 @@ class TextileQualityAssessment:
         for contour in contours:
             area = cv2.contourArea(contour)
             # Filter out very small contours (likely noise)
-            if area > 50:  # Minimum area threshold
+            if area > 200:  # Yumshatildi: faqat katta nuqsonlarni aniqlash (50 o'rniga 200)
                 total_defect_area += area
                 significant_defects.append(contour)
         
@@ -675,6 +743,195 @@ class TextileQualityAssessment:
             'defect_count': len(significant_defects),
             'total_defect_area': total_defect_area,
             'defect_percentage': defect_percentage,
+            'contours': significant_defects,
+            'visualization': defect_visualization
+        }
+    
+    def analyze_texture_features(self, grayscale_image):
+        """
+        Texture xususiyatlarini chuqur tahlil qilish.
+        
+        Args:
+            grayscale_image: Preprocessed grayscale image
+            
+        Returns:
+            dict: Texture features
+        """
+        # 1. Local Binary Pattern (LBP) - oddiy variant
+        # Patch-based texture analysis
+        h, w = grayscale_image.shape
+        patch_size = 32
+        texture_scores = []
+        
+        for i in range(0, h - patch_size, patch_size):
+            for j in range(0, w - patch_size, patch_size):
+                patch = grayscale_image[i:i+patch_size, j:j+patch_size]
+                texture_scores.append(np.std(patch))
+        
+        texture_variance = np.var(texture_scores) if texture_scores else 0
+        texture_mean = np.mean(texture_scores) if texture_scores else 0
+        
+        # 2. Edge density
+        edges = cv2.Canny(grayscale_image, 50, 150)
+        edge_pixels = np.sum(edges > 0)
+        total_pixels = edges.shape[0] * edges.shape[1]
+        edge_density = (edge_pixels / total_pixels) * 100 if total_pixels > 0 else 0
+        
+        # 3. Texture uniformity (past = yaxshi)
+        texture_uniformity = texture_variance
+        
+        return {
+            'texture_variance': texture_variance,
+            'texture_mean': texture_mean,
+            'edge_density': edge_density,
+            'texture_uniformity': texture_uniformity
+        }
+    
+    def calculate_defect_severity(self, defect_percentage, defect_count, defect_shapes=None):
+        """
+        Nuqson og'irligi ballini hisoblash (0-100, past = yaxshi).
+        
+        Args:
+            defect_percentage: Nuqson maydoni foizi
+            defect_count: Nuqsonlar soni
+            defect_shapes: Nuqson shakllari ro'yxati (optional)
+            
+        Returns:
+            float: Severity score (0-100)
+        """
+        # Area-based severity
+        area_score = min(100, defect_percentage * 10)
+        
+        # Count-based severity
+        count_score = min(100, defect_count * 5)
+        
+        # Shape-based severity (agar mavjud bo'lsa)
+        shape_score = 0
+        if defect_shapes and len(defect_shapes) > 0:
+            # Circularity: 1 = aylana, 0 = chiziq
+            # Past circularity = murakkab shakl = yomon
+            avg_circularity = np.mean([s.get('circularity', 0.5) for s in defect_shapes])
+            shape_score = (1 - avg_circularity) * 50
+        
+        # Combined severity (weighted)
+        severity = (area_score * 0.5 + count_score * 0.3 + shape_score * 0.2)
+        
+        return min(100, max(0, severity))
+    
+    def detect_defects_enhanced(self, grayscale_image):
+        """
+        Yaxshilangan nuqson aniqlash - multi-scale, edge-based, texture-based.
+        
+        Qo'shimcha metodlar:
+        - Multi-scale analysis
+        - Edge-based detection
+        - Texture-based detection
+        - Blob detection
+        - Contour shape analysis
+        
+        Args:
+            grayscale_image: Preprocessed grayscale image
+            
+        Returns:
+            dict: Enhanced defect detection results
+        """
+        # 1. Mavjud adaptive thresholding
+        threshold1 = cv2.adaptiveThreshold(
+            grayscale_image, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, 
+            cv2.THRESH_BINARY_INV, 11, 2
+        )
+        threshold2 = cv2.adaptiveThreshold(
+            grayscale_image, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+            cv2.THRESH_BINARY, 11, 2
+        )
+        combined_threshold = cv2.bitwise_or(threshold1, threshold2)
+        
+        # 2. YANGI: Multi-scale analysis
+        scales = [0.5, 1.0, 2.0]  # Kichik, original, katta
+        for scale in scales:
+            if scale != 1.0:
+                scaled = cv2.resize(grayscale_image, None, fx=scale, fy=scale)
+                scaled_thresh = cv2.adaptiveThreshold(
+                    scaled, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+                    cv2.THRESH_BINARY_INV, 11, 2
+                )
+                scaled_thresh = cv2.resize(scaled_thresh, 
+                                          (grayscale_image.shape[1], 
+                                           grayscale_image.shape[0]))
+                combined_threshold = cv2.bitwise_or(combined_threshold, scaled_thresh)
+        
+        # 3. YANGI: Edge-based defect detection (yumshatildi)
+        edges = cv2.Canny(grayscale_image, 50, 150)
+        edge_density_map = cv2.GaussianBlur(edges.astype(np.float32), (15, 15), 0)
+        edge_threshold = edge_density_map > (np.mean(edge_density_map) * 2.5)  # 1.5 o'rniga 2.5 - kamroq sezuvchan
+        combined_threshold = cv2.bitwise_or(
+            combined_threshold, 
+            (edge_threshold * 255).astype(np.uint8)
+        )
+        
+        # 4. Morphological operations (yaxshilangan)
+        kernel_small = np.ones((3, 3), np.uint8)
+        kernel_medium = np.ones((5, 5), np.uint8)
+        
+        # Opening - kichik shovqinni olib tashlash
+        cleaned = cv2.morphologyEx(combined_threshold, cv2.MORPH_OPEN, kernel_small)
+        # Closing - teshiklarni to'ldirish
+        cleaned = cv2.morphologyEx(cleaned, cv2.MORPH_CLOSE, kernel_medium)
+        
+        # 5. YANGI: Connected components filtering
+        num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(cleaned)
+        min_area = 200  # Yumshatildi: faqat katta nuqsonlarni aniqlash (50 o'rniga 200)
+        cleaned_filtered = np.zeros_like(cleaned)
+        for i in range(1, num_labels):
+            if stats[i, cv2.CC_STAT_AREA] >= min_area:
+                cleaned_filtered[labels == i] = 255
+        
+        # 6. Contour analysis (yaxshilangan)
+        contours, _ = cv2.findContours(cleaned_filtered, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        
+        total_defect_area = 0
+        significant_defects = []
+        defect_shapes = []  # YANGI: Nuqson shakllari
+        
+        image_area = grayscale_image.shape[0] * grayscale_image.shape[1]
+        
+        for contour in contours:
+            area = cv2.contourArea(contour)
+            if area > 200:  # Yumshatildi: faqat katta nuqsonlarni aniqlash (50 o'rniga 200)
+                total_defect_area += area
+                
+                # YANGI: Contour shape analysis
+                perimeter = cv2.arcLength(contour, True)
+                if perimeter > 0:
+                    circularity = 4 * np.pi * area / (perimeter ** 2)
+                    defect_shapes.append({
+                        'area': area,
+                        'circularity': circularity,
+                        'perimeter': perimeter
+                    })
+                
+                significant_defects.append(contour)
+        
+        defect_percentage = (total_defect_area / image_area) * 100 if image_area > 0 else 0
+        
+        # YANGI: Defect severity scoring
+        severity_score = self.calculate_defect_severity(
+            defect_percentage,
+            len(significant_defects),
+            defect_shapes
+        )
+        
+        # Visualization
+        defect_visualization = grayscale_image.copy()
+        defect_visualization = cv2.cvtColor(defect_visualization, cv2.COLOR_GRAY2BGR)
+        cv2.drawContours(defect_visualization, significant_defects, -1, (0, 0, 255), 2)
+        
+        return {
+            'defect_count': len(significant_defects),
+            'total_defect_area': total_defect_area,
+            'defect_percentage': defect_percentage,
+            'defect_shapes': defect_shapes,
+            'severity_score': severity_score,
             'contours': significant_defects,
             'visualization': defect_visualization
         }
@@ -711,10 +968,10 @@ class TextileQualityAssessment:
                         defect_percentage < (self.DEFECT_AREA_THRESHOLD_MEDIUM * 100))
         defect_bad = defect_percentage >= (self.DEFECT_AREA_THRESHOLD_MEDIUM * 100)
         
-        # Rule 3: Check defect count
-        defect_count_good = defect_count < 5
-        defect_count_medium = defect_count >= 5 and defect_count < 15
-        defect_count_bad = defect_count >= 15
+        # Rule 3: Check defect count (yumshatildi)
+        defect_count_good = defect_count < 10  # 5 o'rniga 10
+        defect_count_medium = defect_count >= 10 and defect_count < 25  # 5-15 o'rniga 10-25
+        defect_count_bad = defect_count >= 25  # 15 o'rniga 25
         
         # Combined classification logic
         # Priority: If any metric is bad, overall quality is at least medium
@@ -758,6 +1015,117 @@ class TextileQualityAssessment:
         
         return quality, explanation
     
+    def classify_quality_enhanced(self, color_metrics, defect_metrics, texture_metrics):
+        """
+        Yaxshilangan sifat tasnifi - weighted scoring system.
+        
+        Args:
+            color_metrics: Enhanced color analysis results
+            defect_metrics: Enhanced defect detection results
+            texture_metrics: Texture analysis results
+            
+        Returns:
+            tuple: (quality, explanation, score)
+        """
+        # Weighted scoring
+        scores = {
+            'color': 0,
+            'defect': 0,
+            'texture': 0
+        }
+        
+        # Color score (0-100, yuqori = yaxshi)
+        color_variance = color_metrics['combined_variance']
+        # Color consistency score (agar hsv_image mavjud bo'lsa)
+        hsv_for_consistency = color_metrics.get('hsv_image', None)
+        if hsv_for_consistency is not None:
+            color_consistency = self.calculate_color_consistency_score(hsv_for_consistency)
+        else:
+            # Default consistency score based on variance
+            color_consistency = max(0, 100 - (color_variance / 20))
+        
+        # Yumshatilgan threshold qiymatlar
+        if color_variance < 1500:  # 500 o'rniga 1500
+            scores['color'] = 90
+        elif color_variance < 2500:  # 1000 o'rniga 2500
+            scores['color'] = 70
+        elif color_variance < 3000:  # 1500 o'rniga 3000
+            scores['color'] = 50
+        else:
+            scores['color'] = 30
+        
+        # Color consistency ni qo'shish
+        scores['color'] = (scores['color'] * 0.7 + color_consistency * 0.3)
+        
+        # Defect score (0-100, yuqori = yaxshi)
+        defect_percentage = defect_metrics['defect_percentage']
+        defect_count = defect_metrics['defect_count']
+        severity = defect_metrics.get('severity_score', 0)
+        
+        defect_score = 100 - min(100, severity)
+        if defect_count > 30:  # 20 o'rniga 30 - yumshatildi
+            defect_score -= 20
+        if defect_percentage > 10:  # 5 o'rniga 10 - yumshatildi
+            defect_score -= 15
+        
+        scores['defect'] = max(0, defect_score)
+        
+        # Texture score (0-100, yuqori = yaxshi)
+        texture_variance = texture_metrics.get('texture_variance', 0)
+        texture_uniformity = texture_metrics.get('texture_uniformity', 0)
+        
+        if texture_variance < 20:
+            scores['texture'] = 90
+        elif texture_variance < 40:
+            scores['texture'] = 70
+        else:
+            scores['texture'] = 50
+        
+        # Texture uniformity ni hisobga olish
+        if texture_uniformity < 10:
+            scores['texture'] += 10
+        
+        scores['texture'] = min(100, scores['texture'])
+        
+        # Weighted final score
+        weights = {'color': 0.4, 'defect': 0.5, 'texture': 0.1}
+        final_score = (
+            scores['color'] * weights['color'] +
+            scores['defect'] * weights['defect'] +
+            scores['texture'] * weights['texture']
+        )
+        
+        # Classification with confidence
+        if final_score >= 80:
+            quality = "Yaxshi"
+            confidence = (final_score - 80) / 20  # 0-1 scale
+        elif final_score >= 60:
+            quality = "O'rtacha"
+            confidence = (final_score - 60) / 20
+        else:
+            quality = "Yaroqsiz"
+            confidence = (60 - final_score) / 60
+        
+        # Detailed explanation
+        explanation = (
+            f"Sifat: {quality}\n\n"
+            f"Yaxshilangan Tahlil Natijalari:\n"
+            f"• Umumiy Ball: {final_score:.1f}/100\n"
+            f"• Rang Balli: {scores['color']:.1f}/100\n"
+            f"• Nuqson Balli: {scores['defect']:.1f}/100\n"
+            f"• Texture Balli: {scores['texture']:.1f}/100\n\n"
+            f"Tafsilotlar:\n"
+            f"• Rang Bir xilligi: {color_variance:.2f}\n"
+            f"• Nuqson Maydoni: {defect_percentage:.2f}% rasmdan\n"
+            f"• Nuqsonlar Soni: {defect_count} ta\n"
+            f"• Nuqson Og'irligi: {severity:.1f}/100\n\n"
+            f"Tahlil: Yaxshilangan OpenCV metodlari asosida "
+            f"mahsulot sifatini '{quality}' deb baholadi "
+            f"(Ball: {final_score:.1f}/100)."
+        )
+        
+        return quality, explanation, final_score
+    
     def analyze_with_cv(self, processed_images):
         """
         Klassik CV tahlil (backup yoki Hybrid uchun).
@@ -784,208 +1152,46 @@ class TextileQualityAssessment:
             'defect_metrics': defect_metrics
         }
     
-    def extract_ml_features(self, processed_images):
+    def analyze_with_cv_enhanced(self, processed_images):
         """
-        ML model uchun xususiyatlarni ajratish.
+        Yaxshilangan CV tahlil - enhanced metodlar bilan.
         
         Args:
-            processed_images: Preprocessed images dict
+            processed_images: Preprocessed images dict (enhanced preprocessing)
             
         Returns:
-            np.array: Feature vector for ML model
+            dict: Enhanced CV analysis results
         """
-        # CV dan olingan features
-        color_metrics = self.analyze_color_uniformity(
+        # Enhanced color analysis
+        color_metrics = self.analyze_color_uniformity_enhanced(
             processed_images['hsv'],
             processed_images['grayscale']
         )
-        defect_metrics = self.detect_defects(processed_images['grayscale'])
+        color_metrics['hsv_image'] = processed_images['hsv']  # For consistency score
         
-        # Texture features
-        texture_score = self.extract_texture_features(processed_images['grayscale'])
+        # Enhanced defect detection
+        defect_metrics = self.detect_defects_enhanced(processed_images['grayscale'])
         
-        # Edge density
-        edge_density = self.calculate_edge_density(processed_images['grayscale'])
+        # Texture analysis
+        texture_metrics = self.analyze_texture_features(processed_images['grayscale'])
         
-        # Feature array (ML model uchun)
-        feature_array = np.array([
-            color_metrics['combined_variance'],
-            color_metrics['gray_std'],
-            color_metrics['value_variance'],
-            defect_metrics['defect_percentage'],
-            defect_metrics['defect_count'],
-            texture_score,
-            edge_density
-        ])
-        
-        return feature_array
-    
-    def extract_texture_features(self, grayscale_image):
-        """
-        Texture xususiyatlarini ajratish.
-        Oddiy variant: Standard deviation of local patches.
-        """
-        # Image ni kichik qismlarga bo'lish va har bir qismning std ni hisoblash
-        h, w = grayscale_image.shape
-        patch_size = 32
-        texture_scores = []
-        
-        for i in range(0, h - patch_size, patch_size):
-            for j in range(0, w - patch_size, patch_size):
-                patch = grayscale_image[i:i+patch_size, j:j+patch_size]
-                texture_scores.append(np.std(patch))
-        
-        return np.mean(texture_scores) if texture_scores else 0
-    
-    def calculate_edge_density(self, grayscale_image):
-        """
-        Edge density hisoblash.
-        """
-        edges = cv2.Canny(grayscale_image, 50, 150)
-        edge_pixels = np.sum(edges > 0)
-        total_pixels = edges.shape[0] * edges.shape[1]
-        return (edge_pixels / total_pixels) * 100 if total_pixels > 0 else 0
-    
-    def analyze_with_ml(self, processed_images):
-        """
-        To'liq ML model orqali tahlil qilish.
-        
-        Args:
-            processed_images: Preprocessed images dict
-            
-        Returns:
-            dict: ML analysis results
-        """
-        results = {}
-        
-        # Feature extraction
-        ml_features = self.extract_ml_features(processed_images)
-        
-        # Quality Classification with ML
-        if self.ml_quality_model:
-            try:
-                # Reshape for single sample
-                features_reshaped = ml_features.reshape(1, -1)
-                
-                # Predict
-                quality_prediction = self.ml_quality_model.predict(features_reshaped)[0]
-                quality_proba = self.ml_quality_model.predict_proba(features_reshaped)[0]
-                confidence = float(np.max(quality_proba))
-                
-                # Map to Uzbek labels
-                quality_map = {
-                    0: 'Yaxshi',
-                    1: "O'rtacha",
-                    2: 'Yaroqsiz'
-                }
-                
-                # Handle string labels too
-                if isinstance(quality_prediction, str):
-                    quality_uz = quality_prediction
-                else:
-                    quality_uz = quality_map.get(quality_prediction, f"Class_{quality_prediction}")
-                
-                results['quality'] = quality_uz
-                results['confidence'] = confidence
-                results['probabilities'] = {
-                    'Yaxshi': float(quality_proba[0]) if len(quality_proba) > 0 else 0.0,
-                    "O'rtacha": float(quality_proba[1]) if len(quality_proba) > 1 else 0.0,
-                    'Yaroqsiz': float(quality_proba[2]) if len(quality_proba) > 2 else 0.0
-                }
-                
-                # Visualization (use CV defect visualization)
-                defect_metrics = self.detect_defects(processed_images['grayscale'])
-                results['visualization'] = defect_metrics['visualization']
-                
-            except Exception as e:
-                print(f"ML prediction xatoligi: {e}")
-                # Fallback to CV
-                cv_results = self.analyze_with_cv(processed_images)
-                results['quality'] = cv_results['quality']
-                results['confidence'] = 0.0
-                results['probabilities'] = {'Yaxshi': 0.0, "O'rtacha": 0.0, 'Yaroqsiz': 0.0}
-                results['visualization'] = cv_results['visualization']
-        else:
-            # No model available, use CV
-            cv_results = self.analyze_with_cv(processed_images)
-            results = cv_results
-            results['confidence'] = 0.0
-        
-        return results
-    
-    def format_ml_results(self, ml_results):
-        """
-        ML natijalarini formatlash.
-        
-        Args:
-            ml_results: ML analysis results dict
-            
-        Returns:
-            tuple: (quality, explanation)
-        """
-        quality = ml_results['quality']
-        confidence = ml_results.get('confidence', 0.0)
-        probabilities = ml_results.get('probabilities', {})
-        
-        ortacha_prob = probabilities.get("O'rtacha", 0) * 100
-        yaxshi_prob = probabilities.get('Yaxshi', 0) * 100
-        yaroqsiz_prob = probabilities.get('Yaroqsiz', 0) * 100
-        
-        explanation = (
-            f"Sifat: {quality}\n\n"
-            f"ML Model Tahlili:\n"
-            f"• Ishoning Darajasi: {confidence*100:.1f}%\n"
-            f"• Yaxshi Ehtimoli: {yaxshi_prob:.1f}%\n"
-            f"• O'rtacha Ehtimoli: {ortacha_prob:.1f}%\n"
-            f"• Yaroqsiz Ehtimoli: {yaroqsiz_prob:.1f}%\n\n"
-            f"Tahlil: ML model {confidence*100:.1f}% ishonch bilan "
-            f"mahsulot sifatini '{quality}' deb baholadi."
+        # Enhanced classification
+        quality, explanation, score = self.classify_quality_enhanced(
+            color_metrics,
+            defect_metrics,
+            texture_metrics
         )
         
-        return quality, explanation
+        return {
+            'quality': quality,
+            'explanation': explanation,
+            'visualization': defect_metrics['visualization'],
+            'score': score,
+            'color_metrics': color_metrics,
+            'defect_metrics': defect_metrics,
+            'texture_metrics': texture_metrics
+        }
     
-    def combine_ml_cv_results(self, ml_results, cv_results):
-        """
-        ML va CV natijalarini birlashtirish (Hybrid mode).
-        
-        Args:
-            ml_results: ML analysis results
-            cv_results: CV analysis results
-            
-        Returns:
-            tuple: (quality, explanation)
-        """
-        ml_quality = ml_results['quality']
-        ml_confidence = ml_results.get('confidence', 0.0)
-        cv_quality = cv_results['quality']
-        
-        # Decision logic
-        if ml_confidence > 0.85:
-            final_quality = ml_quality
-            method = "ML Model (Yuqori ishonch)"
-        elif ml_confidence > 0.60:
-            if ml_quality == cv_quality:
-                final_quality = ml_quality
-                method = "Hybrid (ML + CV - Bir xil natija)"
-            else:
-                final_quality = ml_quality
-                method = "Hybrid (ML asosiy, CV tekshiruv)"
-        else:
-            final_quality = cv_quality
-            method = "CV (ML ishonchsiz)"
-        
-        # Format explanation
-        ml_explanation = self.format_ml_results(ml_results)[1]
-        
-        explanation = (
-            f"{ml_explanation}\n\n"
-            f"---\n"
-            f"Tahlil Usuli: {method}\n"
-            f"CV Natijasi: {cv_quality}\n"
-            f"ML Natijasi: {ml_quality}"
-        )
-        
-        return final_quality, explanation
     
     def analyze_image(self, image):
         """
@@ -1006,42 +1212,19 @@ class TextileQualityAssessment:
             self.is_analyzing = True
             
             # Update status with loading indicator
-            mode_text = {
-                "ML": "ML model tahlil qilmoqda...",
-                "Hybrid": "Hybrid tahlil qilmoqda...",
-                "CV": "Tahlil qilinmoqda..."
-            }
             if not self.is_camera_running:
-                self.status_label.config(text=mode_text.get(self.analysis_mode, "Tahlil qilinmoqda..."))
+                self.status_label.config(text="Tahlil qilinmoqda...")
                 self.root.update()
             
-            # Step 1: Preprocess the image
-            processed = self.preprocess_image(image)
+            # Step 1: Preprocess the image (enhanced)
+            processed = self.preprocess_image_enhanced(image)
             
-            # Step 2: Analyze based on selected mode
-            confidence = 0.0
-            if self.analysis_mode == "ML" and self.ml_available:
-                # Pure ML analysis
-                ml_results = self.analyze_with_ml(processed)
-                quality, explanation = self.format_ml_results(ml_results)
-                visualization = ml_results.get('visualization', processed['grayscale'])
-                confidence = ml_results.get('confidence', 0.0)
-                
-            elif self.analysis_mode == "Hybrid" and self.ml_available:
-                # Hybrid: ML + CV
-                ml_results = self.analyze_with_ml(processed)
-                cv_results = self.analyze_with_cv(processed)
-                quality, explanation = self.combine_ml_cv_results(ml_results, cv_results)
-                visualization = ml_results.get('visualization', cv_results['visualization'])
-                confidence = ml_results.get('confidence', 0.0)
-                
-            else:
-                # CV analysis (fallback or selected)
-                cv_results = self.analyze_with_cv(processed)
-                quality = cv_results['quality']
-                explanation = cv_results['explanation']
-                visualization = cv_results['visualization']
-                confidence = 0.0  # CV da confidence yo'q
+            # Step 2: Enhanced CV analysis
+            cv_results = self.analyze_with_cv_enhanced(processed)
+            quality = cv_results['quality']
+            explanation = cv_results['explanation']
+            visualization = cv_results['visualization']
+            score = cv_results.get('score', 0.0)
             
             # Step 3: Display results
             self.display_results(
@@ -1049,7 +1232,7 @@ class TextileQualityAssessment:
                 visualization,
                 quality,
                 explanation,
-                confidence
+                score
             )
             
             # Reset analyzing state
@@ -1066,7 +1249,7 @@ class TextileQualityAssessment:
             if not self.is_camera_running:
                 self.set_buttons_state(tk.NORMAL)
     
-    def display_results(self, original_image, processed_image, quality, explanation, confidence=0.0):
+    def display_results(self, original_image, processed_image, quality, explanation, score=0.0):
         """
         Display the analysis results in the GUI.
         
@@ -1075,7 +1258,7 @@ class TextileQualityAssessment:
             processed_image: Image with defect visualization
             quality: Quality classification string
             explanation: Detailed explanation text
-            confidence: ML model confidence score (0.0-1.0)
+            score: CV analysis score (0-100)
         """
         # Update quality result label with color coding (Soft UI colors)
         self.result_label.config(text=quality)
@@ -1086,18 +1269,6 @@ class TextileQualityAssessment:
             self.result_label.config(fg='#d4a574')  # Soft orange/tan
         else:  # Yaroqsiz
             self.result_label.config(fg=self.COLOR_BUTTON_RED)  # Soft red
-        
-        # Update confidence label
-        if confidence > 0:
-            self.confidence_label.config(
-                text=f"Ishoning: {confidence*100:.1f}%",
-                fg=self.COLOR_TEXT_PRIMARY
-            )
-        else:
-            self.confidence_label.config(
-                text="Ishoning: - (CV rejimi)",
-                fg=self.COLOR_TEXT_SECONDARY
-            )
         
         # Update explanation text
         self.explanation_text.delete(1.0, tk.END)
