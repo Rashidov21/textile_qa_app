@@ -1,2 +1,15 @@
 env/
 *.pyc
+dist/
+build/
+*.spec
+*.pyz
+*.pyw
+*.pyz
+*.pyw
+*.pyz
+*.pyw
+*.pyz
+*.pyw
+*.ico
+*.zip

@@ -16,6 +16,12 @@ from PIL import Image, ImageTk
 import threading
 import os
 
+from PIL import Image
+
+# PNG dan ICO ga konvertatsiya
+img = Image.open('icon.png')
+img.save('icon.ico', format='ICO', sizes=[(256,256), (128,128), (64,64), (32,32), (16,16)])
+
 
 class TextileQualityAssessment:
     """
