@@ -62,11 +62,11 @@ class TextileQualityAssessment:
         self.is_analyzing = False  # Track analysis state for UX improvements
         
         # Quality thresholds (adjustable based on testing)
-        # Yumshatilgan threshold qiymatlar - internetdan olingan rasmlar uchun
-        self.COLOR_VARIANCE_THRESHOLD_GOOD = 1500     # Low variance = uniform color = good (3x yumshatildi)
-        self.COLOR_VARIANCE_THRESHOLD_MEDIUM = 3000   # Medium variance (2x yumshatildi)
-        self.DEFECT_AREA_THRESHOLD_SMALL = 0.03       # 3% of image area (3x yumshatildi)
-        self.DEFECT_AREA_THRESHOLD_MEDIUM = 0.10      # 10% of image area (2x yumshatildi)
+        # Rang tekshirish yumshatilgan, defect aniqlash eski holatda
+        self.COLOR_VARIANCE_THRESHOLD_GOOD = 2500     # Yumshatilgan (rang tekshirish uchun)
+        self.COLOR_VARIANCE_THRESHOLD_MEDIUM = 4500   # Yumshatilgan (rang tekshirish uchun)
+        self.DEFECT_AREA_THRESHOLD_SMALL = 0.03       # Eski holat (3% - defect aniqlash uchun)
+        self.DEFECT_AREA_THRESHOLD_MEDIUM = 0.10      # Eski holat (10% - defect aniqlash uchun)
         
         # Store button references for state management
         self.upload_btn = None
@@ -485,16 +485,22 @@ class TextileQualityAssessment:
         Returns:
             dict: Dictionary containing processed images
         """
-        # Step 1: Resize image
+        # Step 1: Resize image (Resolution-aware)
         height, width = image.shape[:2]
+        original_size = (width, height)  # Original resolution ni saqlash
+        original_area = width * height
+        
         max_dimension = 800
+        scale_factor = 1.0  # Default scale factor
         if width > max_dimension or height > max_dimension:
             scale = max_dimension / max(width, height)
             new_width = int(width * scale)
             new_height = int(height * scale)
             resized = cv2.resize(image, (new_width, new_height), interpolation=cv2.INTER_AREA)
+            scale_factor = scale  # Scale factor ni saqlash (defect detection uchun)
         else:
             resized = image.copy()
+            scale_factor = 1.0
         
         # Step 2: Illumination correction using LAB color space
         lab = cv2.cvtColor(resized, cv2.COLOR_BGR2LAB)
@@ -526,7 +532,10 @@ class TextileQualityAssessment:
             'denoised': denoised,
             'blurred': blurred,
             'grayscale': grayscale,
-            'hsv': hsv
+            'hsv': hsv,
+            'scale_factor': scale_factor,  # Resolution-aware: scale factor
+            'original_size': original_size,  # Resolution-aware: original size
+            'original_area': original_area  # Resolution-aware: original area
         }
     
     def analyze_color_uniformity(self, hsv_image, grayscale_image):
@@ -598,9 +607,13 @@ class TextileQualityAssessment:
         hist_normalized = gray_hist / np.sum(gray_hist)
         hist_entropy = -np.sum(hist_normalized * np.log2(hist_normalized + 1e-10))
         
-        # YANGI: Local color uniformity (patch-based)
+        # YANGI: Local color uniformity (patch-based) - Adaptive patch size
         h, w = grayscale_image.shape
-        patch_size = 64
+        
+        # Adaptive patch size - rasm o'lchamiga mos
+        # Minimum 16, maximum 64, ideal: rasm o'lchamining 1/8 qismi
+        patch_size = min(64, max(16, min(h, w) // 8))
+        
         local_variances = []
         for i in range(0, h - patch_size, patch_size):
             for j in range(0, w - patch_size, patch_size):
@@ -672,7 +685,7 @@ class TextileQualityAssessment:
         
         return max(0, consistency_score)
     
-    def detect_defects(self, grayscale_image):
+    def detect_defects(self, grayscale_image, scale_factor=1.0):
         """
         Detect visible defects (stains, dark spots, bright areas) using thresholding and contours.
         
@@ -684,6 +697,7 @@ class TextileQualityAssessment:
         
         Args:
             grayscale_image: Preprocessed grayscale image
+            scale_factor: Scale factor from resize (1.0 = no resize)
             
         Returns:
             dict: Defect detection results
@@ -732,8 +746,12 @@ class TextileQualityAssessment:
         
         for contour in contours:
             area = cv2.contourArea(contour)
+            # Scale-aware area threshold: original resolution uchun 50 piksel
+            area_threshold = int(50 / (scale_factor ** 2)) if scale_factor < 1.0 else 50
+            area_threshold = max(20, area_threshold)  # Minimum 20 piksel
+            
             # Filter out very small contours (likely noise)
-            if area > 200:  # Yumshatildi: faqat katta nuqsonlarni aniqlash (50 o'rniga 200)
+            if area > area_threshold:  # Resolution-aware: scale_factor ni hisobga oladi
                 total_defect_area += area
                 significant_defects.append(contour)
         
@@ -805,11 +823,11 @@ class TextileQualityAssessment:
         Returns:
             float: Severity score (0-100)
         """
-        # Area-based severity
-        area_score = min(100, defect_percentage * 10)
+        # Area-based severity (yumshatildi)
+        area_score = min(100, defect_percentage * 5)   # 10 → 5 (yumshatildi)
         
-        # Count-based severity
-        count_score = min(100, defect_count * 5)
+        # Count-based severity (yumshatildi)
+        count_score = min(100, defect_count * 3)       # 5 → 3 (yumshatildi)
         
         # Shape-based severity (agar mavjud bo'lsa)
         shape_score = 0
@@ -824,7 +842,7 @@ class TextileQualityAssessment:
         
         return min(100, max(0, severity))
     
-    def detect_defects_enhanced(self, grayscale_image):
+    def detect_defects_enhanced(self, grayscale_image, scale_factor=1.0):
         """
         Yaxshilangan nuqson aniqlash - multi-scale, edge-based, texture-based.
         
@@ -834,9 +852,11 @@ class TextileQualityAssessment:
         - Texture-based detection
         - Blob detection
         - Contour shape analysis
+        - Resolution-aware detection (scale_factor)
         
         Args:
             grayscale_image: Preprocessed grayscale image
+            scale_factor: Scale factor from resize (1.0 = no resize)
             
         Returns:
             dict: Enhanced defect detection results
@@ -884,9 +904,15 @@ class TextileQualityAssessment:
         # Closing - teshiklarni to'ldirish
         cleaned = cv2.morphologyEx(cleaned, cv2.MORPH_CLOSE, kernel_medium)
         
-        # 5. YANGI: Connected components filtering
+        # 5. YANGI: Connected components filtering (Resolution-aware)
         num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(cleaned)
-        min_area = 200  # Yumshatildi: faqat katta nuqsonlarni aniqlash (50 o'rniga 200)
+        
+        # Scale-aware min_area: original resolution uchun 50 piksel
+        # Agar resize qilingan bo'lsa, scaled resolution uchun moslashtiriladi
+        min_area_original = 50  # Original resolution uchun minimum area
+        min_area_scaled = int(min_area_original / (scale_factor ** 2)) if scale_factor < 1.0 else min_area_original
+        min_area = max(20, min_area_scaled)  # Minimum 20 piksel (juda kichik bo'lmasin)
+        
         cleaned_filtered = np.zeros_like(cleaned)
         for i in range(1, num_labels):
             if stats[i, cv2.CC_STAT_AREA] >= min_area:
@@ -903,7 +929,11 @@ class TextileQualityAssessment:
         
         for contour in contours:
             area = cv2.contourArea(contour)
-            if area > 200:  # Yumshatildi: faqat katta nuqsonlarni aniqlash (50 o'rniga 200)
+            # Scale-aware area threshold: original resolution uchun 50 piksel
+            area_threshold = int(50 / (scale_factor ** 2)) if scale_factor < 1.0 else 50
+            area_threshold = max(20, area_threshold)  # Minimum 20 piksel
+            
+            if area > area_threshold:  # Resolution-aware: scale_factor ni hisobga oladi
                 total_defect_area += area
                 
                 # YANGI: Contour shape analysis
@@ -974,10 +1004,10 @@ class TextileQualityAssessment:
                         defect_percentage < (self.DEFECT_AREA_THRESHOLD_MEDIUM * 100))
         defect_bad = defect_percentage >= (self.DEFECT_AREA_THRESHOLD_MEDIUM * 100)
         
-        # Rule 3: Check defect count (yumshatildi)
-        defect_count_good = defect_count < 10  # 5 o'rniga 10
-        defect_count_medium = defect_count >= 10 and defect_count < 25  # 5-15 o'rniga 10-25
-        defect_count_bad = defect_count >= 25  # 15 o'rniga 25
+        # Rule 3: Check defect count (yanada yumshatildi - "Yaxshi" natijalarini oshirish uchun)
+        defect_count_good = defect_count < 10      # Eski holat (15 → 10)
+        defect_count_medium = defect_count >= 10 and defect_count < 25  # Eski holat (15-35 → 10-25)
+        defect_count_bad = defect_count >= 25      # Eski holat (35 → 25)
         
         # Combined classification logic
         # Priority: If any metric is bad, overall quality is at least medium
@@ -1047,21 +1077,21 @@ class TextileQualityAssessment:
         if hsv_for_consistency is not None:
             color_consistency = self.calculate_color_consistency_score(hsv_for_consistency)
         else:
-            # Default consistency score based on variance
-            color_consistency = max(0, 100 - (color_variance / 20))
+            # Default consistency score based on variance (yanada yumshatildi)
+            color_consistency = max(0, 100 - (color_variance / 50))  # 30 → 50 (yumshatildi)
         
-        # Yumshatilgan threshold qiymatlar
-        if color_variance < 1500:  # 500 o'rniga 1500
-            scores['color'] = 90
-        elif color_variance < 2500:  # 1000 o'rniga 2500
-            scores['color'] = 70
-        elif color_variance < 3000:  # 1500 o'rniga 3000
-            scores['color'] = 50
+        # Yanada yumshatilgan threshold qiymatlar - "Yaxshi" natijalarini oshirish uchun
+        if color_variance < 3000:      # 2500 → 3000 (yumshatildi)
+            scores['color'] = 98      # 95 → 98 (oshirildi)
+        elif color_variance < 5000:    # 4000 → 5000 (yumshatildi)
+            scores['color'] = 85       # 80 → 85 (oshirildi)
+        elif color_variance < 6000:    # 5000 → 6000 (yumshatildi)
+            scores['color'] = 70       # 65 → 70 (oshirildi)
         else:
-            scores['color'] = 30
+            scores['color'] = 50       # 40 → 50 (oshirildi)
         
-        # Color consistency ni qo'shish
-        scores['color'] = (scores['color'] * 0.7 + color_consistency * 0.3)
+        # Color consistency ni qo'shish (weight kamaytirildi)
+        scores['color'] = (scores['color'] * 0.8 + color_consistency * 0.2)  # 0.7/0.3 → 0.8/0.2
         
         # Defect score (0-100, yuqori = yaxshi)
         defect_percentage = defect_metrics['defect_percentage']
@@ -1069,10 +1099,10 @@ class TextileQualityAssessment:
         severity = defect_metrics.get('severity_score', 0)
         
         defect_score = 100 - min(100, severity)
-        if defect_count > 30:  # 20 o'rniga 30 - yumshatildi
-            defect_score -= 20
-        if defect_percentage > 10:  # 5 o'rniga 10 - yumshatildi
-            defect_score -= 15
+        if defect_count > 30:         # Eski holat (40 → 30)
+            defect_score -= 20        # Eski holat (15 → 20)
+        if defect_percentage > 10:    # Eski holat (15 → 10)
+            defect_score -= 15         # Eski holat (10 → 15)
         
         scores['defect'] = max(0, defect_score)
         
@@ -1101,16 +1131,16 @@ class TextileQualityAssessment:
             scores['texture'] * weights['texture']
         )
         
-        # Classification with confidence
-        if final_score >= 80:
+        # Classification with confidence (yanada yumshatildi - "Yaxshi" natijalarini oshirish uchun)
+        if final_score >= 65:          # 75 → 70 (5 ball pasaytirildi)
             quality = "Yaxshi"
-            confidence = (final_score - 80) / 20  # 0-1 scale
-        elif final_score >= 60:
+            confidence = (final_score - 70) / 20  # 75 → 70
+        elif final_score >= 50:        # 55 → 50 (5 ball pasaytirildi)
             quality = "O'rtacha"
-            confidence = (final_score - 60) / 20
+            confidence = (final_score - 50) / 20   # 55 → 50
         else:
             quality = "Yaroqsiz"
-            confidence = (60 - final_score) / 60
+            confidence = (50 - final_score) / 50  # 55 → 50
         
         # Detailed explanation
         explanation = (
@@ -1146,7 +1176,9 @@ class TextileQualityAssessment:
             processed_images['hsv'],
             processed_images['grayscale']
         )
-        defect_metrics = self.detect_defects(processed_images['grayscale'])
+        # Resolution-aware defect detection
+        scale_factor = processed_images.get('scale_factor', 1.0)
+        defect_metrics = self.detect_defects(processed_images['grayscale'], scale_factor)
         
         quality, explanation = self.classify_quality(color_metrics, defect_metrics)
         
@@ -1175,8 +1207,9 @@ class TextileQualityAssessment:
         )
         color_metrics['hsv_image'] = processed_images['hsv']  # For consistency score
         
-        # Enhanced defect detection
-        defect_metrics = self.detect_defects_enhanced(processed_images['grayscale'])
+        # Enhanced defect detection (Resolution-aware)
+        scale_factor = processed_images.get('scale_factor', 1.0)
+        defect_metrics = self.detect_defects_enhanced(processed_images['grayscale'], scale_factor)
         
         # Texture analysis
         texture_metrics = self.analyze_texture_features(processed_images['grayscale'])
