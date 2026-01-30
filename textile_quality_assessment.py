@@ -37,7 +37,7 @@ class TextileQualityAssessment:
             root: Tkinter root window
         """
         self.root = root
-        self.root.title("To'qimachilik Mahsulotlari Sifatini Baholash Tizimi")
+        self.root.title("Smart textile lux services")
         self.root.geometry("1200x800")
         
         # Soft UI Color Palette
@@ -82,7 +82,7 @@ class TextileQualityAssessment:
         # Title with Soft UI styling
         title_label = tk.Label(
             self.root, 
-            text="To'qimachilik Mahsulotlari Sifatini Baholash Tizimi",
+            text="Smart textile lux services | To'qimachilik Mahsulotlari Sifatini Baholash Tizimi",
             font=("Arial", 18, "bold"),
             bg=self.COLOR_BG_MAIN,
             fg=self.COLOR_TEXT_PRIMARY
